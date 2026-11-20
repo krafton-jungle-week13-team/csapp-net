@@ -19,9 +19,19 @@ void clienterror(int fd, char *cause, char *errnum,
 /* 그림 11.29 */
 int main(int argc, char **argv)
 {
+    int listenfd, connfd;
+    socklen_t clientlen;
+    struct sockaddr_storage clientaddr;
+    char client_hostname[MAXLINE], client_port[MAXLINE];
+
     /* TODO 1. 인자 개수 확인: `./tiny <port>` 형식이 아니면 사용법을 출력하고 종료 */
+    if (argc != 2) {
+        fprintf(stderr, "usage: %s <port>\n", argv[0]);
+        exit(0);
+    }
 
     /* TODO 2. Open_listenfd(port)로 듣기 소켓(listenfd)을 연다 */
+    listenfd = Open_listenfd(argv[1]);
 
     /* TODO 3. 무한 루프
      *   - Accept로 연결 소켓(connfd)을 받는다
@@ -30,7 +40,14 @@ int main(int argc, char **argv)
      *   - doit(connfd)로 트랜잭션 하나를 처리한다
      *   - Close(connfd)
      */
-    return 0;
+     while (1) {
+        clientlen = sizeof(struct sockaddr_storage);
+        connfd = Accept(listenfd, (SA *)&clientaddr, &clientlen);
+        Getnameinfo((SA *) &clientaddr, clientlen, client_hostname, MAXLINE, client_port, MAXLINE, 0);
+        doit(connfd);
+        Close(connfd);
+     }
+    exit(0);
 }
 
 /* 그림 11.30 - HTTP 트랜잭션 하나를 처리한다 */
@@ -38,7 +55,15 @@ void doit(int fd)
 {
     /* TODO 1. Rio_readinitb로 rio를 초기화하고 Rio_readlineb로 요청 줄을 읽는다
      *         (읽은 게 없으면 return). 읽은 줄을 printf로 출력한다 */
+    size_t n;
+    char buf[MAXLINE];
+    rio_t rio;
 
+    Rio_readinitb(&rio, fd);
+    while((n = Rio_readlineb(&rio, buf, MAXLINE)) != 0) {
+        printf("server received %d bytes\n", (int)n);
+        Rio_writen(fd, buf, n);
+    }
     /* TODO 2. sscanf로 method, uri, version을 나눈다 */
 
     /* TODO 3. method가 GET이 아니면(strcasecmp) 501 Not Implemented 에러 후 return */

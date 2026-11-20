@@ -44,6 +44,7 @@ int main(int argc, char **argv)
         clientlen = sizeof(struct sockaddr_storage);
         connfd = Accept(listenfd, (SA *)&clientaddr, &clientlen);
         Getnameinfo((SA *) &clientaddr, clientlen, client_hostname, MAXLINE, client_port, MAXLINE, 0);
+        printf("Accepted connection from (%s, %s)\n", client_hostname, client_port);
         doit(connfd);
         Close(connfd);
      }
@@ -53,26 +54,46 @@ int main(int argc, char **argv)
 /* 그림 11.30 - HTTP 트랜잭션 하나를 처리한다 */
 void doit(int fd)
 {
-    /* TODO 1. Rio_readinitb로 rio를 초기화하고 Rio_readlineb로 요청 줄을 읽는다
-     *         (읽은 게 없으면 return). 읽은 줄을 printf로 출력한다 */
-    size_t n;
-    char buf[MAXLINE];
+    int is_static;
+    struct stat sbuf;
+    char buf[MAXLINE], method[MAXLINE], uri[MAXLINE], version[MAXLINE];
+    char filename[MAXLINE], cgiargs[MAXLINE];
     rio_t rio;
 
+    /* TODO 1. Rio_readinitb로 rio를 초기화하고 Rio_readlineb로 요청 줄을 읽는다
+     *         (읽은 게 없으면 return). 읽은 줄을 printf로 출력한다 */
     Rio_readinitb(&rio, fd);
-    while((n = Rio_readlineb(&rio, buf, MAXLINE)) != 0) {
-        printf("server received %d bytes\n", (int)n);
-        Rio_writen(fd, buf, n);
-    }
+    if (!Rio_readlineb(&rio, buf, MAXLINE))
+        return;
+    printf("Request headers:\n");
+    printf("%s", buf);
+   
     /* TODO 2. sscanf로 method, uri, version을 나눈다 */
+    sscanf(buf, "%s %s %s", method, uri, version);
+    printf("method=[%s] uri=[%s] version=[%s]\n", method, uri, version);
 
     /* TODO 3. method가 GET이 아니면(strcasecmp) 501 Not Implemented 에러 후 return */
+    if (strcasecmp(method, "GET")) {
+        clienterror(fd, method, "501", "Not implemented", "Tiny does not implement this method");
+        return;
+    }
+
+    printf("%s", "Done1\n");
 
     /* TODO 4. read_requesthdrs로 나머지 요청 헤더를 읽어 버린다 */
+    read_requesthdrs(&rio);
 
     /* TODO 5. parse_uri로 정적/동적 여부, filename, cgiargs를 얻는다 */
+    is_static = parse_uri(uri, filename, cgiargs);
 
     /* TODO 6. stat(filename, &sbuf)이 실패하면 404 Not found 에러 후 return */
+    if (stat(filename, &sbuf) < 0) { // 파일 정보를 확인하는 시스템 콜
+        clienterror(fd, filename, "404", "Not found", "Tiny couldn't find this file");
+        return;
+    }
+
+    printf("%s", "Done2\n");
+
 
     /* TODO 7. 정적이면
      *           - 일반 파일(S_ISREG)이 아니거나 읽기 권한(S_IRUSR)이 없으면 403
@@ -81,12 +102,31 @@ void doit(int fd)
      *           - 일반 파일이 아니거나 실행 권한(S_IXUSR)이 없으면 403
      *           - serve_dynamic(fd, filename, cgiargs)
      */
+     if (is_static) {
+        if (!(S_ISREG(sbuf.st_mode)) || !!(S_IRUSR & sbuf.st_mode)) {
+            clienterror(fd, filename, "403", "Forbidden", "Tiny couldn't read this file");
+            return;
+        }
+        serv_static(fd, filename, sbuf.st_size);
+    }
+    else {
+        if (!(S_ISREG(sbuf.st_mode)) || !(S_IXUSR & sbuf.st_mode)) {
+            clienterror(fd, filename, "403", "Forbidden", "Tiny couldn't run the CGI program");
+            return;
+        }
+        serve_dynamic(fd, filename, cgiargs);
+    }
 }
 
 /* 그림 11.32 - 요청 헤더를 읽고 무시한다 */
 void read_requesthdrs(rio_t *rp)
 {
     /* TODO 빈 줄("\r\n")이 나올 때까지 한 줄씩 읽고 printf로 출력한다 */
+    char buf[MAXLINE];
+
+    while (Rio_readlineb(rp, buf, MAXLINE) > 0 && strcmp(buf, "\r\n")) {
+        printf("%s", buf);
+    }
 }
 
 /* 그림 11.33 - URI를 파일 이름과 CGI 인자로 나눈다
@@ -167,6 +207,27 @@ void clienterror(int fd, char *cause, char *errnum,
      *   Content-type: text/html
      *   (빈 줄)
      */
+
+    char buf[MAXLINE], body[MAXBUF];
+    int len = 0;
+
+    /* 본문 먼저 만들기 (Content-length를 알아야 하니까) */
+    len += sprintf(body + len, "<html><title>Tiny Error</title>");
+    len += sprintf(body + len, "<body bgcolor=\"ffffff\">\r\n");
+    len += sprintf(body + len, "%s: %s\r\n", errnum, shortmsg);
+    len += sprintf(body + len, "<p>%s: %s\r\n", longmsg, cause);
+    len += sprintf(body + len, "<hr><em>The Tiny Web server</em>\r\n");
+
+    /* 헤더 보내기 */
+    sprintf(buf, "HTTP/1.0 %s %s\r\n", errnum, shortmsg);
+    Rio_writen(fd, buf, strlen(buf));
+    sprintf(buf, "Content-type: text/html\r\n");
+    Rio_writen(fd, buf, strlen(buf));
+    sprintf(buf, "Content-length: %d\r\n\r\n", len);   // 빈 줄까지
+    Rio_writen(fd, buf, strlen(buf));
+
+    /* 본문 보내기 */
+    Rio_writen(fd, body, len);
 
     /* TODO 2. 응답 본문 (간단한 HTML)
      *   <html><title>Tiny Error</title><body bgcolor="ffffff">

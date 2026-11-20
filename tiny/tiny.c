@@ -19,10 +19,18 @@ void clienterror(int fd, char *cause, char *errnum,
 /* 그림 11.29 */
 int main(int argc, char **argv)
 {
+    int listenfd, connfd;
+    char hostname[MAXLINE], port[MAXLINE];
+    socklen_t clientlen;
+    struct sockaddr_storage clientaddr;
+
     /* TODO 1. 인자 개수 확인: `./tiny <port>` 형식이 아니면 사용법을 출력하고 종료 */
-
+    if (argc != 2){
+        fprintf(stderr, "usage: %s <port>\n", argv[0]);
+        exit(1);
+    }
     /* TODO 2. Open_listenfd(port)로 듣기 소켓(listenfd)을 연다 */
-
+    listenfd = Open_listenfd(argv[1]);
     /* TODO 3. 무한 루프
      *   - Accept로 연결 소켓(connfd)을 받는다
      *   - Getnameinfo로 클라이언트 호스트/포트를 얻어
@@ -30,7 +38,15 @@ int main(int argc, char **argv)
      *   - doit(connfd)로 트랜잭션 하나를 처리한다
      *   - Close(connfd)
      */
-    return 0;
+    while(1){
+        clientlen = sizeof(clientaddr);
+        connfd = Accept(listenfd, (SA *)&clientaddr, &clientlen);
+        Getnameinfo(SA *) &clientaddr, clientlen, hostname, MAXLINE,
+                    port, MAXLINE, 0;
+        printf("Accepted connection from (%s, %s)\n", hostname, port);
+        doit(connfd);
+        Close(connfd);
+    }
 }
 
 /* 그림 11.30 - HTTP 트랜잭션 하나를 처리한다 */

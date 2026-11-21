@@ -78,8 +78,6 @@ void doit(int fd)
         return;
     }
 
-    printf("%s", "Done1\n");
-
     /* TODO 4. read_requesthdrs로 나머지 요청 헤더를 읽어 버린다 */
     read_requesthdrs(&rio);
 
@@ -92,9 +90,6 @@ void doit(int fd)
         return;
     }
 
-    printf("%s", "Done2\n");
-
-
     /* TODO 7. 정적이면
      *           - 일반 파일(S_ISREG)이 아니거나 읽기 권한(S_IRUSR)이 없으면 403
      *           - serve_static(fd, filename, sbuf.st_size)
@@ -103,11 +98,11 @@ void doit(int fd)
      *           - serve_dynamic(fd, filename, cgiargs)
      */
      if (is_static) {
-        if (!(S_ISREG(sbuf.st_mode)) || !!(S_IRUSR & sbuf.st_mode)) {
+        if (!(S_ISREG(sbuf.st_mode)) || !(S_IRUSR & sbuf.st_mode)) {
             clienterror(fd, filename, "403", "Forbidden", "Tiny couldn't read this file");
             return;
         }
-        serv_static(fd, filename, sbuf.st_size);
+        serve_static(fd, filename, sbuf.st_size);
     }
     else {
         if (!(S_ISREG(sbuf.st_mode)) || !(S_IXUSR & sbuf.st_mode)) {
@@ -133,12 +128,22 @@ void read_requesthdrs(rio_t *rp)
  * 반환값: 정적 콘텐츠면 1, 동적 콘텐츠면 0 */
 int parse_uri(char *uri, char *filename, char *cgiargs)
 {
+    char *ptr;
+
     /* TODO 1. uri에 "cgi-bin"이 없으면 정적
      *   - cgiargs를 빈 문자열로
      *   - filename = "." + uri
      *   - uri가 '/'로 끝나면 filename 뒤에 "home.html"을 붙인다
      *   - return 1
      */
+     if (!strstr(uri, "cgi-bin")) {
+        strcpy(cgiargs, "");
+        strcpy(filename, ".");
+        strcat(filename, uri);
+        if (uri[strlen(uri)-1] == '/')
+            strcat(filename, "home.html");
+        return 1;
+     }
 
     /* TODO 2. 있으면 동적
      *   - uri에서 '?'를 찾아 그 뒤를 cgiargs로 복사하고, '?' 자리를 '\0'으로 끊는다
@@ -146,7 +151,18 @@ int parse_uri(char *uri, char *filename, char *cgiargs)
      *   - filename = "." + uri
      *   - return 0
      */
-    return 1;
+    else {
+        ptr = index(uri, '?');
+        if (ptr) {
+            strcpy(cgiargs, ptr+1);
+            *ptr = '\0';
+        }
+        else
+            strcpy(cgiargs, "");
+        strcpy(filename, ".");
+        strcat(filename, uri);
+        return 0;
+    }
 }
 
 /* 그림 11.34 - 정적 파일을 클라이언트에 보낸다 */
@@ -202,12 +218,6 @@ void serve_dynamic(int fd, char *filename, char *cgiargs)
 void clienterror(int fd, char *cause, char *errnum,
                  char *shortmsg, char *longmsg)
 {
-    /* TODO 1. 응답 헤더
-     *   HTTP/1.0 <errnum> <shortmsg>
-     *   Content-type: text/html
-     *   (빈 줄)
-     */
-
     char buf[MAXLINE], body[MAXBUF];
     int len = 0;
 
@@ -228,11 +238,4 @@ void clienterror(int fd, char *cause, char *errnum,
 
     /* 본문 보내기 */
     Rio_writen(fd, body, len);
-
-    /* TODO 2. 응답 본문 (간단한 HTML)
-     *   <html><title>Tiny Error</title><body bgcolor="ffffff">
-     *   <errnum>: <shortmsg>
-     *   <p><longmsg>: <cause>
-     *   <hr><em>The Tiny Web server</em>
-     */
 }

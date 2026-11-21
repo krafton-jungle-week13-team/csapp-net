@@ -168,8 +168,12 @@ int parse_uri(char *uri, char *filename, char *cgiargs)
 /* 그림 11.34 - 정적 파일을 클라이언트에 보낸다 */
 void serve_static(int fd, char *filename, int filesize)
 {
-    /* TODO 1. get_filetype으로 Content-type을 정한다 */
+    int srcfd;
+    char *srcp, filetype[MAXLINE], buf[MAXLINE];
+    int len = 0;
 
+    /* TODO 1. get_filetype으로 Content-type을 정한다 */
+    get_filetype(filename, filetype);
     /* TODO 2. 응답 헤더를 보낸다 (각 줄 끝은 \r\n, 마지막엔 빈 줄 \r\n 하나 더)
      *   HTTP/1.0 200 OK
      *   Server: Tiny Web Server
@@ -179,6 +183,12 @@ void serve_static(int fd, char *filename, int filesize)
      *   주의: sprintf(buf, "%s...", buf)처럼 같은 버퍼를 읽고 쓰면 안 돼요.
      *         한 줄씩 sprintf → Rio_writen 하거나, 길이를 기억해 이어 쓰세요.
      */
+    len += sprintf(buf + len, "HTTP/1.0 200 OK\r\n");
+    len += sprintf(buf + len, "Server: Tiny Web Server\r\n");
+    len += sprintf(buf + len, "Connection: close\r\n");
+    len += sprintf(buf + len, "Content-length: %d\r\n", filesize);
+    len += sprintf(buf + len, "Content-type: %s\r\n\r\n", filetype); // 브라우저가 filetype를 보고 바이트 해석
+    Rio_writen(fd, buf, len);
 
     /* TODO 3. 응답 본문을 보낸다
      *   - Open으로 파일을 열고
@@ -186,6 +196,11 @@ void serve_static(int fd, char *filename, int filesize)
      *   - Rio_writen으로 매핑한 영역을 fd에 쓰고
      *   - Munmap으로 매핑 해제
      */
+    srcfd = Open(filename, O_RDONLY, 0);
+    srcp = Mmap(0, filesize, PROT_READ, MAP_PRIVATE, srcfd, 0);
+    Close(srcfd); // 파일을 닫아도 매핑된 객체는 유지됨
+    Rio_writen(fd, srcp, filesize);
+    Munmap(srcp, filesize);
 }
 
 /* 파일 이름의 확장자로 MIME 타입을 정한다 */
@@ -193,16 +208,28 @@ void get_filetype(char *filename, char *filetype)
 {
     /* TODO .html → text/html, .gif → image/gif, .png → image/png,
      *      .jpg → image/jpeg, 나머지 → text/plain */
-    strcpy(filetype, "text/plain");
+    if (strstr(filename, ".html"))
+        strcpy(filetype, "text/html");
+    else if (strstr(filename, ".gif"))
+        strcpy(filetype, "image/gif");
+    else if (strstr(filename, ".jpg"))
+        strcpy(filetype, "image/jpeg");
+    else
+        strcpy(filetype, "text/plain");
 }
 
 /* 그림 11.35 - CGI 프로그램을 실행해 동적 콘텐츠를 보낸다 */
 void serve_dynamic(int fd, char *filename, char *cgiargs)
 {
+    char buf[MAXLINE], *emptylist[] = { NULL };
     /* TODO 1. 응답의 앞부분만 보낸다 (나머지 헤더와 본문은 CGI 프로그램이 출력)
      *   HTTP/1.0 200 OK
      *   Server: Tiny Web Server
      */
+    sprintf(buf, "HTTP/1.0 200 OK\r\n");
+    Rio_writen(fd, buf, strlen(buf));
+    sprintf(buf, "Server: Tiny Web Server\r\n");
+    Rio_writen(fd, buf, strlen(buf));
 
     /* TODO 2. Fork로 자식 프로세스를 만들고, 자식에서
      *   - setenv("QUERY_STRING", cgiargs, 1)
@@ -211,7 +238,14 @@ void serve_dynamic(int fd, char *filename, char *cgiargs)
      *     (emptylist는 { NULL }인 char* 배열)
      */
 
+    if (Fork() == 0) { // 내가 자식 프로세스라면
+        setenv("QUERY_STRING", cgiargs, 1);
+        Dup2(fd, STDOUT_FILENO);
+        Execve(filename, emptylist, environ);
+    }
+
     /* TODO 3. 부모는 Wait(NULL)로 자식을 회수한다 */
+    Wait(NULL);
 }
 
 /* 그림 11.31 - 에러 응답을 보낸다 */
